@@ -64,4 +64,15 @@ docker compose up -d
 docker compose exec lab bash
 ```
 
-**이후 모든 `docker compose` 명령은 이 폴더에서 칩니다.**
+컨테이너 안에서 `make serve`를 실행하면 호스트의 `http://localhost:8000`으로
+접속할 수 있습니다. 8000번 포트가 이미 사용 중이면 컨테이너를 올릴 때 다른
+포트를 지정하고, 서버는 컨테이너 안에서 평소처럼 실행합니다.
+
+```sh
+PORT=8080 docker compose up -d
+docker compose exec lab bash
+make serve
+```
+
+이 경우 `http://localhost:8080`으로 접속합니다. Codespaces에서는 전달된 포트
+알림을 사용하면 됩니다. **이후 모든 `docker compose` 명령은 이 폴더에서 칩니다.**

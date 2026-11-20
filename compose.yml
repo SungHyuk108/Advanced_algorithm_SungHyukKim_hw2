@@ -13,5 +13,9 @@ services:
     working_dir: /work
     volumes:
       - .:/work
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    environment:
+      PORT: "${PORT:-8000}"
     # 서버가 아니라 작업대다. 떠 있기만 하면 되고, 실제 작업은 exec으로 한다.
     command: sleep infinity
