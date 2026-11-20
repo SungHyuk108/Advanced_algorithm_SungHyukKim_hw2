@@ -31,7 +31,7 @@ class HashTableTests(unittest.TestCase):
         self.assertTrue(table.contains_key(second))
         value, probes = table.get_with_probes(first)
         self.assertEqual(value, "first")
-        self.assertGreaterEqual(probes, 1)
+        self.assertEqual(probes, 2)
 
     def test_overwrite_does_not_increase_size(self):
         table = HashTable(initial_capacity=4)
@@ -51,10 +51,42 @@ class HashTableTests(unittest.TestCase):
 
     def test_horner_trace_reports_each_character(self):
         table = HashTable(initial_capacity=8, resize_threshold=None)
-        trace = table.hash_trace("ab")
-        self.assertEqual([entry[0] for entry in trace], ["a", "b"])
-        self.assertEqual([entry[1] for entry in trace], [ord("a"), ord("b")])
-        self.assertEqual(trace[-1][2], table.bucket_index("ab"))
+        trace = table.hash_trace("abc")
+        self.assertEqual([entry[0] for entry in trace], ["a", "b", "c"])
+        self.assertEqual([entry[1] for entry in trace], [ord("a"), ord("b"), ord("c")])
+        self.assertEqual([entry[2] for entry in trace], [1, 1, 2])
+        self.assertEqual(trace[-1][2], table.bucket_index("abc"))
+
+    def test_linear_probing_wraps_from_last_bucket_to_first(self):
+        from src.hash_table import LinearProbingHashTable
+
+        table = LinearProbingHashTable(initial_capacity=4, resize_threshold=None)
+        keys = []
+        for number in range(100):
+            key = f"wrap-{number}"
+            if table.bucket_index(key) == table.capacity - 1:
+                keys.append(key)
+            if len(keys) == 2:
+                break
+
+        self.assertEqual(len(keys), 2)
+        table.put(keys[0], "first")
+        table.put(keys[1], "second")
+        self.assertEqual(table.get(keys[0]), "first")
+        value, probes = table.get_with_probes(keys[1])
+        self.assertEqual(value, "second")
+        self.assertEqual(probes, 2)
+
+    def test_linear_probing_can_fill_fixed_capacity_and_retrieve_every_key(self):
+        from src.hash_table import LinearProbingHashTable
+
+        table = LinearProbingHashTable(initial_capacity=4, resize_threshold=None)
+        for number in range(table.capacity):
+            table.put(f"full-{number}", number)
+
+        self.assertEqual(len(table), table.capacity)
+        for number in range(table.capacity):
+            self.assertEqual(table.get(f"full-{number}"), number)
 
     def test_non_string_keys_are_rejected(self):
         table = HashTable(initial_capacity=4)
