@@ -6,7 +6,12 @@ from urllib.parse import urlencode
 
 from src.base62 import encode
 from src.hash_table import LinearProbingHashTable
-from src.server import LINEAR_DEMO_URLS, make_handler
+from src.server import (
+    CHAIN_DEMO_URLS,
+    LINEAR_DEMO_URLS,
+    _seed_chaining_demo,
+    make_handler,
+)
 from src.shortener import URLShortener
 
 
@@ -86,6 +91,39 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertIn('href="/1"', body)
         self.assertIn('href="/table/linear"', body)
         self.assertIn('target="_blank"', body)
+
+    def test_chaining_demo_shows_30_urls_and_real_bucket_collisions(self):
+        _seed_chaining_demo(self.shortener)
+        table = self.shortener.url_table
+        bucket_lengths = [
+            len(table.bucket_items(index)) for index in range(table.capacity)
+        ]
+        collision_bucket_count = sum(1 for length in bucket_lengths if length > 1)
+
+        self.assertEqual(len(CHAIN_DEMO_URLS), 30)
+        self.assertEqual(table.capacity, 64)
+        self.assertEqual(len(table), 30)
+        self.assertEqual(collision_bucket_count, 5)
+        self.assertEqual(max(bucket_lengths), 2)
+
+        status, _, chaining_page = self._request("GET", "/table")
+        self.assertEqual(status, 200)
+        self.assertIn("URL:</strong> 30개", chaining_page)
+        self.assertIn("충돌 버킷:</strong> 5개", chaining_page)
+        self.assertIn("최대 연결 길이:</strong> 2", chaining_page)
+        self.assertIn("연결 리스트", chaining_page)
+        self.assertIn("→", chaining_page)
+        for demo_url in CHAIN_DEMO_URLS:
+            self.assertIn(demo_url, chaining_page)
+
+        linear_status, _, linear_page = self._request("GET", "/table/linear")
+        self.assertEqual(linear_status, 200)
+        for demo_url in CHAIN_DEMO_URLS:
+            self.assertNotIn(demo_url, linear_page)
+
+        chain_status, chain_headers, _ = self._request("GET", "/0")
+        self.assertEqual(chain_status, 302)
+        self.assertEqual(chain_headers["Location"], CHAIN_DEMO_URLS[0])
 
     def test_linear_table_is_separate_and_shows_all_slots_and_collision_paths(self):
         chain_url = "https://chain-only.example/"

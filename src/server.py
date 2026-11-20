@@ -12,40 +12,43 @@ from src.shortener import URLShortener
 
 MAX_REQUEST_BODY = 8192
 HOST = "0.0.0.0"
+_DEMO_URL_SLUGS = (
+    "ant",
+    "bee",
+    "cat",
+    "dog",
+    "eel",
+    "fox",
+    "goat",
+    "hare",
+    "ibis",
+    "jay",
+    "koala",
+    "lion",
+    "mole",
+    "newt",
+    "otter",
+    "panda",
+    "quail",
+    "rabbit",
+    "seal",
+    "tiger",
+    "urchin",
+    "viper",
+    "wolf",
+    "yak",
+    "zebra",
+    "badger",
+    "camel",
+    "donkey",
+    "eagle",
+    "ferret",
+)
+CHAIN_DEMO_URLS = tuple(
+    f"https://chain-demo.example/item/{slug}" for slug in _DEMO_URL_SLUGS
+)
 LINEAR_DEMO_URLS = tuple(
-    f"https://linear-demo.example/{slug}"
-    for slug in (
-        "ant",
-        "bee",
-        "cat",
-        "dog",
-        "eel",
-        "fox",
-        "goat",
-        "hare",
-        "ibis",
-        "jay",
-        "koala",
-        "lion",
-        "mole",
-        "newt",
-        "otter",
-        "panda",
-        "quail",
-        "rabbit",
-        "seal",
-        "tiger",
-        "urchin",
-        "viper",
-        "wolf",
-        "yak",
-        "zebra",
-        "badger",
-        "camel",
-        "donkey",
-        "eagle",
-        "ferret",
-    )
+    f"https://linear-demo.example/{slug}" for slug in _DEMO_URL_SLUGS
 )
 
 
@@ -156,6 +159,17 @@ def _table_page(
             "분리된 선형 탐지 데모 테이블을 새 창에서 보기</a></p>"
         )
         output.append("<p>버킷의 노드는 연결 리스트 순서이며, 화살표는 다음 노드입니다.</p>")
+        chain_lengths = [
+            len(table.bucket_items(index)) for index in range(table.capacity)
+        ]
+        collision_bucket_count = sum(1 for length in chain_lengths if length > 1)
+        max_chain_length = max(chain_lengths, default=0)
+        output.append(
+            f"<p><strong>칸 수:</strong> {table.capacity} · "
+            f"<strong>URL:</strong> {len(table)}개 · "
+            f"<strong>충돌 버킷:</strong> {collision_bucket_count}개 · "
+            f"<strong>최대 연결 길이:</strong> {max_chain_length}</p>"
+        )
     else:
         output.append(
             "<p>이 화면은 개별 체이닝 테이블과 별도의 선형 탐지 테이블입니다. "
@@ -224,6 +238,13 @@ def _make_linear_demo_shortener() -> URLShortener:
     for url in LINEAR_DEMO_URLS:
         shortener.shorten(url)
     return shortener
+
+
+def _seed_chaining_demo(shortener: URLShortener) -> None:
+    if not isinstance(shortener.url_table, HashTable):
+        raise TypeError("chaining demo requires HashTable")
+    for url in CHAIN_DEMO_URLS:
+        shortener.shorten(url)
 
 
 def _linear_table_page(shortener: URLShortener) -> str:
@@ -450,6 +471,8 @@ def serve(port: int = 8000, table_mode: str = "chaining") -> None:
     else:
         raise ValueError("table_mode must be 'chaining' or 'linear'")
     shortener = URLShortener(table_type=table_type)
+    if table_mode == "chaining":
+        _seed_chaining_demo(shortener)
     server = HTTPServer((HOST, port), make_handler(shortener))
     print(
         f"URL shortener listening on http://{HOST}:{server.server_port} "
