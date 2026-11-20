@@ -87,6 +87,9 @@ class HashTableTests(unittest.TestCase):
         self.assertEqual(len(table), table.capacity)
         for number in range(table.capacity):
             self.assertEqual(table.get(f"full-{number}"), number)
+        self.assertFalse(table.contains_key("missing"))
+        with self.assertRaises(KeyError):
+            table.get("missing")
 
     def test_non_string_keys_are_rejected(self):
         table = HashTable(initial_capacity=4)
