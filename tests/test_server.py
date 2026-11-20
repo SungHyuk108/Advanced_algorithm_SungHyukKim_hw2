@@ -4,6 +4,7 @@ from http.server import HTTPServer
 from threading import Thread
 from urllib.parse import urlencode
 
+from src.base62 import encode
 from src.server import LINEAR_DEMO_URLS, make_handler
 from src.shortener import URLShortener
 
@@ -85,7 +86,7 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertIn('href="/table/linear"', body)
         self.assertIn('target="_blank"', body)
 
-    def test_linear_table_is_separate_and_preloaded_with_wrapping_collisions(self):
+    def test_linear_table_is_separate_and_shows_all_slots_and_collision_paths(self):
         chain_url = "https://chain-only.example/"
         self.assertEqual(self._shorten(chain_url)[0], 200)
         status, _, chaining_page = self._request("GET", "/table")
@@ -95,15 +96,19 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertEqual(linear_status, 200)
         self.assertIn("연결 리스트", chaining_page)
         self.assertIn(chain_url, chaining_page)
+        self.assertEqual(len(LINEAR_DEMO_URLS), 30)
         for demo_url in LINEAR_DEMO_URLS:
             self.assertIn(demo_url, linear_page)
             self.assertNotIn(demo_url, chaining_page)
         self.assertNotIn(chain_url, linear_page)
-        self.assertIn("Horner 해시 계산 과정", linear_page)
-        self.assertIn("조사한 칸", linear_page)
-        self.assertIn("(시작 칸 + 이동 횟수) % 용량", linear_page)
-        self.assertIn("(6 + 2) % 8 = 0: 충돌", linear_page)
-        self.assertIn("(6 + 3) % 8 = 1: 대상 키 발견", linear_page)
+        self.assertIn("용량:</strong> 64칸", linear_page)
+        self.assertIn("적재율:</strong> 0.469", linear_page)
+        self.assertEqual(linear_page.count('class="occupied-slot"'), 30)
+        self.assertEqual(linear_page.count('class="empty-slot"'), 34)
+        self.assertIn("시작 칸 62", linear_page)
+        self.assertIn("62 → 63 → 0 → 1", linear_page)
+        self.assertIn("실제 조사 순서", linear_page)
+        self.assertNotIn("<details>", linear_page)
         self.assertIn('href="/linear/0"', linear_page)
         self.assertIn('action="/linear/shorten"', linear_page)
 
@@ -122,9 +127,10 @@ class ShortenerServerTests(unittest.TestCase):
             urlencode({"url": linear_url}),
         )
         self.assertEqual(status, 200)
-        self.assertIn('<a href="/linear/4">/linear/4</a>', response_body)
+        code = encode(len(LINEAR_DEMO_URLS))
+        self.assertIn(f'<a href="/linear/{code}">/linear/{code}</a>', response_body)
 
-        status, headers, _ = self._request("GET", "/linear/4")
+        status, headers, _ = self._request("GET", f"/linear/{code}")
         self.assertEqual(status, 302)
         self.assertEqual(headers["Location"], linear_url)
         status, _, chaining_page = self._request("GET", "/table")

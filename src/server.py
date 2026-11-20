@@ -12,11 +12,40 @@ from src.shortener import URLShortener
 
 MAX_REQUEST_BODY = 8192
 HOST = "0.0.0.0"
-LINEAR_DEMO_URLS = (
-    "https://linear-demo.example/5",
-    "https://linear-demo.example/10",
-    "https://linear-demo.example/18",
-    "https://linear-demo.example/21",
+LINEAR_DEMO_URLS = tuple(
+    f"https://linear-demo.example/{number}"
+    for number in (
+        5,
+        18,
+        104,
+        126,
+        148,
+        203,
+        225,
+        247,
+        269,
+        302,
+        324,
+        346,
+        368,
+        401,
+        423,
+        445,
+        467,
+        489,
+        500,
+        522,
+        544,
+        566,
+        588,
+        621,
+        643,
+        665,
+        687,
+        720,
+        742,
+        764,
+    )
 )
 
 
@@ -41,6 +70,11 @@ def _render_page(title: str, content: str) -> str:
     .node p {{ margin: .35rem 0; }}
     .arrow {{ align-self: center; font-size: 1.4rem; }}
     .empty {{ color: #666; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .slot-table {{ border-collapse: collapse; min-width: 900px; width: 100%; }}
+    .slot-table th, .slot-table td {{ border: 1px solid #bbb; padding: .5rem; text-align: left; vertical-align: top; }}
+    .slot-table th {{ background: #eee; }}
+    .slot-table .empty-slot {{ color: #666; }}
     ol {{ overflow-wrap: anywhere; }}
   </style>
 </head>
@@ -192,6 +226,77 @@ def _make_linear_demo_shortener() -> URLShortener:
     return shortener
 
 
+def _linear_table_page(shortener: URLShortener) -> str:
+    table = shortener.url_table
+    if not isinstance(table, LinearProbingHashTable):
+        raise TypeError("linear shortener must use LinearProbingHashTable")
+
+    demo_start = table.bucket_index(LINEAR_DEMO_URLS[0])
+    all_demo_urls_collide = all(
+        table.bucket_index(url) == demo_start for url in LINEAR_DEMO_URLS
+    )
+    if all_demo_urls_collide:
+        collision_summary = (
+            f"초기 시연 URL {len(LINEAR_DEMO_URLS)}개가 시작 칸 {demo_start}에서 "
+            "충돌합니다."
+        )
+    else:
+        collision_summary = "저장된 각 URL의 실제 시작 칸과 탐사 순서를 표에 표시합니다."
+
+    output = [
+        "<p><strong>자료구조:</strong> 각 슬롯에는 URL 하나만 저장하며, "
+        "충돌하면 다음 슬롯을 검사합니다. 빈 슬롯도 결과에 표시합니다.</p>",
+        (
+            f"<p><strong>용량:</strong> {table.capacity}칸 · "
+            f"<strong>URL:</strong> {len(table)}개 · "
+            f"<strong>적재율:</strong> {len(table) / table.capacity:.3f}</p>"
+        ),
+        (
+            f"<p>{collision_summary} 다음 슬롯은 "
+            f"(현재 슬롯 + 1) % {table.capacity}로 계산됩니다.</p>"
+        ),
+        '<div class="table-wrap"><table class="slot-table">',
+        "<thead><tr>"
+        "<th scope=\"col\">슬롯</th><th scope=\"col\">상태</th>"
+        "<th scope=\"col\">URL 키</th><th scope=\"col\">짧은 코드</th>"
+        "<th scope=\"col\">짧은 링크</th><th scope=\"col\">시작 칸 h(key)</th>"
+        "<th scope=\"col\">이동 / 검사</th><th scope=\"col\">실제 조사 순서</th>"
+        "</tr></thead><tbody>",
+    ]
+
+    for slot in range(table.capacity):
+        nodes = table.bucket_items(slot)
+        if not nodes:
+            output.append(
+                f'<tr class="empty-slot"><th scope="row">{slot}</th>'
+                '<td colspan="7">비어 있음</td></tr>'
+            )
+            continue
+        if len(nodes) != 1:
+            raise RuntimeError("linear probing slots must contain at most one URL")
+
+        url, stored_code = nodes[0]
+        if not isinstance(stored_code, str):
+            raise RuntimeError("URL index contains a non-string short code")
+        trace = table.probe_trace(url)
+        start = table.bucket_index(url)
+        probe_path = " → ".join(str(probe_slot) for probe_slot, _ in trace)
+        link_path = html.escape(f"/linear/{stored_code}", quote=True)
+        output.append(
+            f'<tr class="occupied-slot"><th scope="row">{slot}</th>'
+            "<td>저장됨</td>"
+            f"<td><code>{html.escape(url)}</code></td>"
+            f"<td><code>{html.escape(stored_code)}</code></td>"
+            f'<td><a href="{link_path}">{link_path}</a></td>'
+            f"<td>{start}</td>"
+            f"<td>{len(trace) - 1}칸 / {len(trace)}회</td>"
+            f"<td><code>{probe_path}</code></td></tr>"
+        )
+
+    output.append("</tbody></table></div>")
+    return "\n".join(output)
+
+
 def make_handler(
     shortener: URLShortener,
     linear_shortener: URLShortener | None = None,
@@ -231,10 +336,7 @@ def make_handler(
   <br><button type="submit">선형 테이블에 줄이기</button>
 </form>
 """
-                content += _table_page(
-                    linear_shortener.url_table,
-                    short_link_prefix="/linear/",
-                )
+                content += _linear_table_page(linear_shortener)
                 _send_html(self, 200, "선형 탐지 해시 테이블", content)
                 return
 
