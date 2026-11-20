@@ -13,38 +13,38 @@ from src.shortener import URLShortener
 MAX_REQUEST_BODY = 8192
 HOST = "0.0.0.0"
 LINEAR_DEMO_URLS = tuple(
-    f"https://linear-demo.example/{number}"
-    for number in (
-        5,
-        18,
-        104,
-        126,
-        148,
-        203,
-        225,
-        247,
-        269,
-        302,
-        324,
-        346,
-        368,
-        401,
-        423,
-        445,
-        467,
-        489,
-        500,
-        522,
-        544,
-        566,
-        588,
-        621,
-        643,
-        665,
-        687,
-        720,
-        742,
-        764,
+    f"https://linear-demo.example/{slug}"
+    for slug in (
+        "ant",
+        "bee",
+        "cat",
+        "dog",
+        "eel",
+        "fox",
+        "goat",
+        "hare",
+        "ibis",
+        "jay",
+        "koala",
+        "lion",
+        "mole",
+        "newt",
+        "otter",
+        "panda",
+        "quail",
+        "rabbit",
+        "seal",
+        "tiger",
+        "urchin",
+        "viper",
+        "wolf",
+        "yak",
+        "zebra",
+        "badger",
+        "camel",
+        "donkey",
+        "eagle",
+        "ferret",
     )
 )
 
@@ -231,17 +231,22 @@ def _linear_table_page(shortener: URLShortener) -> str:
     if not isinstance(table, LinearProbingHashTable):
         raise TypeError("linear shortener must use LinearProbingHashTable")
 
-    demo_start = table.bucket_index(LINEAR_DEMO_URLS[0])
-    all_demo_urls_collide = all(
-        table.bucket_index(url) == demo_start for url in LINEAR_DEMO_URLS
+    demo_start_buckets = sorted(
+        table.bucket_index(url) for url in LINEAR_DEMO_URLS
     )
-    if all_demo_urls_collide:
-        collision_summary = (
-            f"초기 시연 URL {len(LINEAR_DEMO_URLS)}개가 시작 칸 {demo_start}에서 "
-            "충돌합니다."
-        )
-    else:
-        collision_summary = "저장된 각 URL의 실제 시작 칸과 탐사 순서를 표에 표시합니다."
+    unique_start_count = sum(
+        1
+        for index, bucket in enumerate(demo_start_buckets)
+        if index == 0 or bucket != demo_start_buckets[index - 1]
+    )
+    probe_counts = [len(table.probe_trace(url)) for url in LINEAR_DEMO_URLS]
+    displaced_url_count = sum(1 for probes in probe_counts if probes > 1)
+    collision_summary = (
+        f"시연 URL {len(LINEAR_DEMO_URLS)}개는 시작 칸 {unique_start_count}곳에 "
+        f"분산되며, 시작 칸 중복은 {len(LINEAR_DEMO_URLS) - unique_start_count}건입니다. "
+        f"{displaced_url_count}개 URL은 충돌로 1회보다 많이 검사되고, "
+        f"최대 검사 횟수는 {max(probe_counts)}회입니다."
+    )
 
     output = [
         "<p><strong>자료구조:</strong> 각 슬롯에는 URL 하나만 저장하며, "

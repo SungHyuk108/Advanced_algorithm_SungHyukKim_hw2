@@ -5,6 +5,7 @@ from threading import Thread
 from urllib.parse import urlencode
 
 from src.base62 import encode
+from src.hash_table import LinearProbingHashTable
 from src.server import LINEAR_DEMO_URLS, make_handler
 from src.shortener import URLShortener
 
@@ -101,12 +102,34 @@ class ShortenerServerTests(unittest.TestCase):
             self.assertIn(demo_url, linear_page)
             self.assertNotIn(demo_url, chaining_page)
         self.assertNotIn(chain_url, linear_page)
+
+        demo_table = LinearProbingHashTable()
+        for demo_url in LINEAR_DEMO_URLS:
+            demo_table.put(demo_url, demo_url)
+        start_buckets = sorted(
+            demo_table.bucket_index(demo_url) for demo_url in LINEAR_DEMO_URLS
+        )
+        unique_start_count = sum(
+            1
+            for index, bucket in enumerate(start_buckets)
+            if index == 0 or bucket != start_buckets[index - 1]
+        )
+        probe_counts = [
+            len(demo_table.probe_trace(demo_url)) for demo_url in LINEAR_DEMO_URLS
+        ]
+        self.assertEqual(unique_start_count, 25)
+        self.assertEqual(sum(probes > 1 for probes in probe_counts), 6)
+        self.assertEqual(max(probe_counts), 4)
+
         self.assertIn("용량:</strong> 64칸", linear_page)
         self.assertIn("적재율:</strong> 0.469", linear_page)
         self.assertEqual(linear_page.count('class="occupied-slot"'), 30)
         self.assertEqual(linear_page.count('class="empty-slot"'), 34)
-        self.assertIn("시작 칸 62", linear_page)
-        self.assertIn("62 → 63 → 0 → 1", linear_page)
+        self.assertIn("시작 칸 25곳", linear_page)
+        self.assertIn("시작 칸 중복은 5건", linear_page)
+        self.assertIn("6개 URL은 충돌로", linear_page)
+        self.assertIn("최대 검사 횟수는 4회", linear_page)
+        self.assertIn("50 → 51 → 52", linear_page)
         self.assertIn("실제 조사 순서", linear_page)
         self.assertNotIn("<details>", linear_page)
         self.assertIn('href="/linear/0"', linear_page)
