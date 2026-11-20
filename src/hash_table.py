@@ -93,15 +93,22 @@ class HashTable(_HashTableBase):
         return value
 
     def get_with_probes(self, key: str) -> tuple[object, int]:
+        found, value, probes = self.search_with_probes(key)
+        if not found:
+            raise KeyError(key)
+        return value, probes
+
+    def search_with_probes(self, key: str) -> tuple[bool, object | None, int]:
+        """Return whether a key exists, its value, and the number of nodes visited."""
         self._validate_key(key)
         node = self._buckets[self.bucket_index(key)]
         probes = 0
         while node is not None:
             probes += 1
             if node.key == key:
-                return node.value, probes
+                return True, node.value, probes
             node = node.next
-        raise KeyError(key)
+        return False, None, probes
 
     def contains_key(self, key: str) -> bool:
         self._validate_key(key)
@@ -190,11 +197,33 @@ class LinearProbingHashTable(_HashTableBase):
         return value
 
     def get_with_probes(self, key: str) -> tuple[object, int]:
+        found, value, probes = self.search_with_probes(key)
+        if not found:
+            raise KeyError(key)
+        return value, probes
+
+    def search_with_probes(self, key: str) -> tuple[bool, object | None, int]:
+        """Return whether a key exists, its value, and the number of slots visited."""
         self._validate_key(key)
         index, probes, found = self._find_slot(key)
         if not found:
-            raise KeyError(key)
-        return self._values[index], probes
+            return False, None, probes
+        if index is None:
+            raise RuntimeError("found key has no slot")
+        return True, self._values[index], probes
+
+    def probe_trace(self, key: str) -> list[tuple[int, str | None]]:
+        """Return each inspected slot and its current key, stopping at the key or a gap."""
+        self._validate_key(key)
+        start = self.bucket_index(key)
+        trace = []
+        for offset in range(self._capacity):
+            index = (start + offset) % self._capacity
+            stored_key = self._keys[index]
+            trace.append((index, stored_key))
+            if stored_key is None or stored_key == key:
+                break
+        return trace
 
     def contains_key(self, key: str) -> bool:
         self._validate_key(key)

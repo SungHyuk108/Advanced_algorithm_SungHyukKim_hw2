@@ -82,6 +82,35 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertIn("→", body)
         self.assertIn('href="/0"', body)
         self.assertIn('href="/1"', body)
+        self.assertIn('href="/table/linear"', body)
+        self.assertIn('target="_blank"', body)
+
+    def test_linear_table_is_an_additional_view_with_probe_calculations(self):
+        first_url = "https://example.org/linear-first"
+        table = self.shortener.url_table
+        initial_bucket = table.bucket_index(first_url)
+        second_url = None
+        for number in range(10_000):
+            candidate = f"https://example.org/linear-{number}"
+            if candidate != first_url and table.bucket_index(candidate) == initial_bucket:
+                second_url = candidate
+                break
+        if second_url is None:
+            self.fail("could not find a URL with the same initial bucket")
+
+        self.assertEqual(self._shorten(first_url)[0], 200)
+        self.assertEqual(self._shorten(second_url)[0], 200)
+        status, _, chaining_page = self._request("GET", "/table")
+        linear_status, _, linear_page = self._request("GET", "/table/linear")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(linear_status, 200)
+        self.assertIn("연결 리스트", chaining_page)
+        self.assertIn("linear-first", linear_page)
+        self.assertIn("Horner 해시 계산 과정", linear_page)
+        self.assertIn("조사한 칸", linear_page)
+        self.assertIn("(시작 칸 + 이동 횟수) % 용량", linear_page)
+        self.assertIn("충돌", linear_page)
 
 
 if __name__ == "__main__":

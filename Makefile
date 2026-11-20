@@ -3,14 +3,16 @@
 #
 #   make test        유닛 테스트 (tests/test_*.py)
 #   make serve       단축 URL 웹 서버 (포트 8000)
-#   make experiment  적재율에 따른 탐지 횟수 실험
+#   make experiment         개별 체이닝 탐지 횟수 실험
+#   make compare-experiment 두 테이블의 탐지 횟수 비교
 #   make clean       캐시 정리
 #
 # 외부 라이브러리를 쓰지 않는다. Python 표준 모듈만으로 돈다.
 
 PORT ?= 8000
+TABLE ?= chaining
 
-.PHONY: all test serve experiment clean
+.PHONY: all test serve experiment compare-experiment clean
 
 all: test
 
@@ -18,10 +20,13 @@ test:
 	@python3 -m unittest discover -s tests -v
 
 serve:
-	@python3 -m src.server --port $(PORT)
+	@python3 -m src.server --port $(PORT) --table $(TABLE)
 
 experiment:
 	@python3 -m experiments.probe_experiment
+
+compare-experiment:
+	@python3 -m experiments.probe_comparison
 
 clean:
 	rm -rf src/__pycache__ tests/__pycache__ experiments/__pycache__

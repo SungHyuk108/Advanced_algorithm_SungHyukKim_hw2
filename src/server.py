@@ -39,7 +39,11 @@ def _render_page(title: str, content: str) -> str:
   </style>
 </head>
 <body>
-  <nav><a href="/">URL 줄이기</a><a href="/table">해시 테이블</a></nav>
+  <nav>
+    <a href="/">URL 줄이기</a>
+    <a href="/table">해시 테이블</a>
+    <a href="/table/linear" target="_blank" rel="noopener">선형 탐지 보기 (새 창)</a>
+  </nav>
   <main>
     <h1>{escaped_title}</h1>
     {content}
@@ -63,10 +67,49 @@ def _send_html(
     handler.wfile.write(body)
 
 
+def _append_probe_trace(
+    output: list[str],
+    table: LinearProbingHashTable,
+    key: str,
+) -> None:
+    start = table.bucket_index(key)
+    output.extend(
+        (
+            "<details>",
+            "<summary>조사한 칸과 선형 탐지 계산 근거</summary>",
+            f"<p>시작 칸 h = {start}; 검사 순서: (시작 칸 + 이동 횟수) % 용량</p>",
+            "<ol>",
+        )
+    )
+    for offset, (slot, stored_key) in enumerate(table.probe_trace(key)):
+        if stored_key is None:
+            reason = "빈 칸에 도달"
+        elif stored_key == key:
+            reason = "대상 키 발견"
+        else:
+            reason = f"충돌: <code>{html.escape(stored_key)}</code>가 있어 다음 칸 검사"
+        output.append(
+            "<li>"
+            f"({start} + {offset}) % {table.capacity} = {slot}: {reason}"
+            "</li>"
+        )
+    output.extend(("</ol>", "</details>"))
+
+
 def _table_page(table: HashTable | LinearProbingHashTable) -> str:
+    linear_table = table if isinstance(table, LinearProbingHashTable) else None
     output = [
-        "<p>버킷의 노드는 연결 리스트 순서이며, 화살표는 다음 노드를 가리킵니다.</p>"
+        '<p><a href="/table/linear" target="_blank" rel="noopener">'
+        "선형 탐지 테이블을 새 창에서 보기</a></p>"
     ]
+    if linear_table is None:
+        output.append("<p>버킷의 노드는 연결 리스트 순서이며, 화살표는 다음 노드입니다.</p>")
+    else:
+        output.append(
+            "<p>선형 탐지는 Horner 시작 칸부터 빈 칸이나 키를 찾을 때까지 "
+            "다음 슬롯을 순서대로 검사합니다.</p>"
+        )
+
     for bucket_index in range(table.capacity):
         nodes = table.bucket_items(bucket_index)
         output.append(
@@ -76,7 +119,8 @@ def _table_page(table: HashTable | LinearProbingHashTable) -> str:
             output.append('<span class="empty">비어 있음</span></section>')
             continue
 
-        output.append('<div class="chain">')
+        if linear_table is None:
+            output.append('<div class="chain">')
         for node_index, (url, stored_code) in enumerate(nodes):
             if not isinstance(stored_code, str):
                 raise RuntimeError("URL index contains a non-string short code")
@@ -105,13 +149,32 @@ def _table_page(table: HashTable | LinearProbingHashTable) -> str:
                     "</li>"
                 )
                 previous_hash = accumulated
-            output.extend(("</ol>", "</details>", "</article>"))
-            if node_index + 1 < len(nodes):
-                output.append('<span class="arrow" aria-label="다음 노드">→</span>')
+            output.extend(("</ol>", "</details>"))
+            if linear_table is None:
+                output.append("</article>")
+                if node_index + 1 < len(nodes):
+                    output.append('<span class="arrow" aria-label="다음 노드">→</span>')
+                else:
+                    output.append('<span class="arrow">→ ∅</span>')
             else:
-                output.append('<span class="arrow">→ ∅</span>')
-        output.append("</div></section>")
+                _append_probe_trace(output, linear_table, url)
+                output.append("</article>")
+        if linear_table is None:
+            output.append("</div>")
+        output.append("</section>")
     return "\n".join(output)
+
+
+def _linear_view_table(
+    source: HashTable | LinearProbingHashTable,
+) -> LinearProbingHashTable:
+    table = LinearProbingHashTable(
+        initial_capacity=source.capacity,
+        resize_threshold=None,
+    )
+    for key, value in source.items():
+        table.put(key, value)
+    return table
 
 
 def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
@@ -134,6 +197,11 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
             if path == "/table":
                 content = _table_page(shortener.url_table)
                 _send_html(self, 200, "해시 테이블", content)
+                return
+
+            if path == "/table/linear":
+                content = _table_page(_linear_view_table(shortener.url_table))
+                _send_html(self, 200, "선형 탐지 해시 테이블", content)
                 return
 
             if not path.startswith("/") or path.count("/") != 1 or len(path) == 1:
@@ -215,9 +283,19 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
     return ShortenerRequestHandler
 
 
-def serve(port: int = 8000) -> None:
-    server = HTTPServer((HOST, port), make_handler(URLShortener()))
-    print(f"URL shortener listening on http://{HOST}:{server.server_port}")
+def serve(port: int = 8000, table_mode: str = "chaining") -> None:
+    if table_mode == "linear":
+        table_type = LinearProbingHashTable
+    elif table_mode == "chaining":
+        table_type = HashTable
+    else:
+        raise ValueError("table_mode must be 'chaining' or 'linear'")
+    shortener = URLShortener(table_type=table_type)
+    server = HTTPServer((HOST, port), make_handler(shortener))
+    print(
+        f"URL shortener listening on http://{HOST}:{server.server_port} "
+        f"with {table_mode} table"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -229,10 +307,16 @@ def serve(port: int = 8000) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the URL shortener HTTP service.")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--table",
+        choices=("chaining", "linear"),
+        default="chaining",
+        help="table implementation used by the shortener",
+    )
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
-    serve(args.port)
+    serve(args.port, args.table)
 
 
 if __name__ == "__main__":

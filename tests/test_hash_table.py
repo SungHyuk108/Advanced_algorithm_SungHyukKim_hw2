@@ -1,6 +1,6 @@
 import unittest
 
-from src.hash_table import HashTable
+from src.hash_table import HashTable, LinearProbingHashTable
 
 
 class HashTableTests(unittest.TestCase):
@@ -58,8 +58,6 @@ class HashTableTests(unittest.TestCase):
         self.assertEqual(trace[-1][2], table.bucket_index("abc"))
 
     def test_linear_probing_wraps_from_last_bucket_to_first(self):
-        from src.hash_table import LinearProbingHashTable
-
         table = LinearProbingHashTable(initial_capacity=4, resize_threshold=None)
         keys = []
         for number in range(100):
@@ -76,10 +74,12 @@ class HashTableTests(unittest.TestCase):
         value, probes = table.get_with_probes(keys[1])
         self.assertEqual(value, "second")
         self.assertEqual(probes, 2)
+        self.assertEqual(
+            [slot for slot, _ in table.probe_trace(keys[1])],
+            [table.capacity - 1, 0],
+        )
 
     def test_linear_probing_can_fill_fixed_capacity_and_retrieve_every_key(self):
-        from src.hash_table import LinearProbingHashTable
-
         table = LinearProbingHashTable(initial_capacity=4, resize_threshold=None)
         for number in range(table.capacity):
             table.put(f"full-{number}", number)
@@ -90,6 +90,41 @@ class HashTableTests(unittest.TestCase):
         self.assertFalse(table.contains_key("missing"))
         with self.assertRaises(KeyError):
             table.get("missing")
+        missing_key = next(
+            f"missing-{number}"
+            for number in range(100)
+            if table.bucket_index(f"missing-{number}")
+            == table.bucket_index("present")
+        )
+        found, value, probes = table.search_with_probes(missing_key)
+        self.assertFalse(found)
+        self.assertIsNone(value)
+        self.assertEqual(probes, table.capacity)
+        self.assertEqual(len(table.probe_trace("missing")), table.capacity)
+
+    def test_both_tables_share_measured_search_behavior(self):
+        for table_type in (HashTable, LinearProbingHashTable):
+            with self.subTest(table_type=table_type.__name__):
+                table = table_type(initial_capacity=4, resize_threshold=None)
+                table.put("present", None)
+
+                found, value, probes = table.search_with_probes("present")
+                self.assertTrue(found)
+                self.assertIsNone(value)
+                self.assertEqual(probes, 1)
+
+                missing_key = next(
+                    f"missing-{number}"
+                    for number in range(100)
+                    if table.bucket_index(f"missing-{number}")
+                    == table.bucket_index("present")
+                )
+                found, value, probes = table.search_with_probes(missing_key)
+                self.assertFalse(found)
+                self.assertIsNone(value)
+                self.assertGreaterEqual(probes, 1)
+                self.assertEqual(len(table), 1)
+                self.assertEqual(list(table.items()), [("present", None)])
 
     def test_non_string_keys_are_rejected(self):
         table = HashTable(initial_capacity=4)
