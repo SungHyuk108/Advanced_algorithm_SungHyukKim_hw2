@@ -12,6 +12,12 @@ from src.shortener import URLShortener
 
 MAX_REQUEST_BODY = 8192
 HOST = "0.0.0.0"
+LINEAR_DEMO_URLS = (
+    "https://linear-demo.example/5",
+    "https://linear-demo.example/10",
+    "https://linear-demo.example/18",
+    "https://linear-demo.example/21",
+)
 
 
 def _render_page(title: str, content: str) -> str:
@@ -67,6 +73,14 @@ def _send_html(
     handler.wfile.write(body)
 
 
+def _send_redirect(handler: BaseHTTPRequestHandler, url: str) -> None:
+    location = quote(url, safe=":/?#[]@!$&'()*+,;=%")
+    handler.send_response(302)
+    handler.send_header("Location", location)
+    handler.send_header("Content-Length", "0")
+    handler.end_headers()
+
+
 def _append_probe_trace(
     output: list[str],
     table: LinearProbingHashTable,
@@ -96,18 +110,22 @@ def _append_probe_trace(
     output.extend(("</ol>", "</details>"))
 
 
-def _table_page(table: HashTable | LinearProbingHashTable) -> str:
+def _table_page(
+    table: HashTable | LinearProbingHashTable,
+    short_link_prefix: str = "/",
+) -> str:
     linear_table = table if isinstance(table, LinearProbingHashTable) else None
-    output = [
-        '<p><a href="/table/linear" target="_blank" rel="noopener">'
-        "선형 탐지 테이블을 새 창에서 보기</a></p>"
-    ]
+    output = []
     if linear_table is None:
+        output.append(
+            '<p><a href="/table/linear" target="_blank" rel="noopener">'
+            "분리된 선형 탐지 데모 테이블을 새 창에서 보기</a></p>"
+        )
         output.append("<p>버킷의 노드는 연결 리스트 순서이며, 화살표는 다음 노드입니다.</p>")
     else:
         output.append(
-            "<p>선형 탐지는 Horner 시작 칸부터 빈 칸이나 키를 찾을 때까지 "
-            "다음 슬롯을 순서대로 검사합니다.</p>"
+            "<p>이 화면은 개별 체이닝 테이블과 별도의 선형 탐지 테이블입니다. "
+            "Horner 시작 칸부터 빈 칸이나 키를 찾을 때까지 다음 슬롯을 검사합니다.</p>"
         )
 
     for bucket_index in range(table.capacity):
@@ -125,6 +143,7 @@ def _table_page(table: HashTable | LinearProbingHashTable) -> str:
             if not isinstance(stored_code, str):
                 raise RuntimeError("URL index contains a non-string short code")
             code = html.escape(stored_code, quote=True)
+            short_link = html.escape(f"{short_link_prefix}{stored_code}", quote=True)
             safe_url = html.escape(url)
             output.extend(
                 (
@@ -132,7 +151,8 @@ def _table_page(table: HashTable | LinearProbingHashTable) -> str:
                     f"<h3>노드 {node_index + 1}</h3>",
                     f"<p><strong>URL 키:</strong> <code>{safe_url}</code></p>",
                     f"<p><strong>짧은 코드:</strong> <code>{code}</code></p>",
-                    f'<p><strong>짧은 링크:</strong> <a href="/{code}">/{code}</a></p>',
+                    f'<p><strong>짧은 링크:</strong> '
+                    f'<a href="{short_link}">{short_link}</a></p>',
                     "<details>",
                     "<summary>Horner 해시 계산 과정</summary>",
                     f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>",
@@ -165,20 +185,24 @@ def _table_page(table: HashTable | LinearProbingHashTable) -> str:
     return "\n".join(output)
 
 
-def _linear_view_table(
-    source: HashTable | LinearProbingHashTable,
-) -> LinearProbingHashTable:
-    table = LinearProbingHashTable(
-        initial_capacity=source.capacity,
-        resize_threshold=None,
-    )
-    for key, value in source.items():
-        table.put(key, value)
-    return table
+def _make_linear_demo_shortener() -> URLShortener:
+    shortener = URLShortener(table_type=LinearProbingHashTable)
+    for url in LINEAR_DEMO_URLS:
+        shortener.shorten(url)
+    return shortener
 
 
-def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
-    """Create an HTTP handler backed by one shortener instance."""
+def make_handler(
+    shortener: URLShortener,
+    linear_shortener: URLShortener | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    """Create a handler with separate primary and linear-demo shorteners."""
+    if linear_shortener is None:
+        linear_shortener = _make_linear_demo_shortener()
+    if linear_shortener is shortener:
+        raise ValueError("the primary and linear shorteners must be separate")
+    if not isinstance(linear_shortener.url_table, LinearProbingHashTable):
+        raise TypeError("linear_shortener must use LinearProbingHashTable")
 
     class ShortenerRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -200,8 +224,33 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
                 return
 
             if path == "/table/linear":
-                content = _table_page(_linear_view_table(shortener.url_table))
+                content = """
+<form method="post" action="/linear/shorten">
+  <label for="linear-url">선형 탐지 테이블에 URL 추가</label><br>
+  <input id="linear-url" name="url" type="url" required>
+  <br><button type="submit">선형 테이블에 줄이기</button>
+</form>
+"""
+                content += _table_page(
+                    linear_shortener.url_table,
+                    short_link_prefix="/linear/",
+                )
                 _send_html(self, 200, "선형 탐지 해시 테이블", content)
+                return
+
+            if path.startswith("/linear/"):
+                code = path[len("/linear/") :]
+                if not code or "/" in code:
+                    _send_html(self, 404, "찾을 수 없음", "<p>짧은 링크가 없습니다.</p>")
+                    return
+                try:
+                    original_url = linear_shortener.expand(code)
+                except KeyError:
+                    _send_html(self, 404, "찾을 수 없음", "<p>짧은 링크가 없습니다.</p>")
+                    return
+                if not isinstance(original_url, str):
+                    raise RuntimeError("linear code index contains a non-string URL")
+                _send_redirect(self, original_url)
                 return
 
             if not path.startswith("/") or path.count("/") != 1 or len(path) == 1:
@@ -217,14 +266,17 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
             if not isinstance(original_url, str):
                 raise RuntimeError("code index contains a non-string URL")
 
-            location = quote(original_url, safe=":/?#[]@!$&'()*+,;=%")
-            self.send_response(302)
-            self.send_header("Location", location)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            _send_redirect(self, original_url)
 
         def do_POST(self) -> None:
-            if urlsplit(self.path).path != "/shorten":
+            path = urlsplit(self.path).path
+            if path == "/shorten":
+                target_shortener = shortener
+                short_link_prefix = "/"
+            elif path == "/linear/shorten":
+                target_shortener = linear_shortener
+                short_link_prefix = "/linear/"
+            else:
                 _send_html(self, 404, "찾을 수 없음", "<p>요청한 경로가 없습니다.</p>")
                 return
 
@@ -261,7 +313,7 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
                 _send_html(self, 400, "잘못된 요청", "<p>URL을 입력해 주세요.</p>")
                 return
             try:
-                code = shortener.shorten(url)
+                code = target_shortener.shorten(url)
             except ValueError:
                 _send_html(
                     self,
@@ -272,10 +324,10 @@ def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
                 return
 
             escaped_url = html.escape(url)
-            escaped_code = html.escape(code, quote=True)
+            short_link = html.escape(f"{short_link_prefix}{code}", quote=True)
             content = (
                 f"<p>원래 URL: <code>{escaped_url}</code></p>"
-                f'<p>짧은 링크: <a href="/{escaped_code}">/{escaped_code}</a></p>'
+                f'<p>짧은 링크: <a href="{short_link}">{short_link}</a></p>'
                 '<p><a href="/">다른 URL 줄이기</a></p>'
             )
             _send_html(self, 200, "단축 결과", content)

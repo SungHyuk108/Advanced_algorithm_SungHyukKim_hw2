@@ -4,7 +4,7 @@ from http.server import HTTPServer
 from threading import Thread
 from urllib.parse import urlencode
 
-from src.server import make_handler
+from src.server import LINEAR_DEMO_URLS, make_handler
 from src.shortener import URLShortener
 
 
@@ -85,32 +85,54 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertIn('href="/table/linear"', body)
         self.assertIn('target="_blank"', body)
 
-    def test_linear_table_is_an_additional_view_with_probe_calculations(self):
-        first_url = "https://example.org/linear-first"
-        table = self.shortener.url_table
-        initial_bucket = table.bucket_index(first_url)
-        second_url = None
-        for number in range(10_000):
-            candidate = f"https://example.org/linear-{number}"
-            if candidate != first_url and table.bucket_index(candidate) == initial_bucket:
-                second_url = candidate
-                break
-        if second_url is None:
-            self.fail("could not find a URL with the same initial bucket")
-
-        self.assertEqual(self._shorten(first_url)[0], 200)
-        self.assertEqual(self._shorten(second_url)[0], 200)
+    def test_linear_table_is_separate_and_preloaded_with_wrapping_collisions(self):
+        chain_url = "https://chain-only.example/"
+        self.assertEqual(self._shorten(chain_url)[0], 200)
         status, _, chaining_page = self._request("GET", "/table")
         linear_status, _, linear_page = self._request("GET", "/table/linear")
 
         self.assertEqual(status, 200)
         self.assertEqual(linear_status, 200)
         self.assertIn("연결 리스트", chaining_page)
-        self.assertIn("linear-first", linear_page)
+        self.assertIn(chain_url, chaining_page)
+        for demo_url in LINEAR_DEMO_URLS:
+            self.assertIn(demo_url, linear_page)
+            self.assertNotIn(demo_url, chaining_page)
+        self.assertNotIn(chain_url, linear_page)
         self.assertIn("Horner 해시 계산 과정", linear_page)
         self.assertIn("조사한 칸", linear_page)
         self.assertIn("(시작 칸 + 이동 횟수) % 용량", linear_page)
-        self.assertIn("충돌", linear_page)
+        self.assertIn("(6 + 2) % 8 = 0: 충돌", linear_page)
+        self.assertIn("(6 + 3) % 8 = 1: 대상 키 발견", linear_page)
+        self.assertIn('href="/linear/0"', linear_page)
+        self.assertIn('action="/linear/shorten"', linear_page)
+
+        linear_status, linear_headers, _ = self._request("GET", "/linear/0")
+        self.assertEqual(linear_status, 302)
+        self.assertEqual(linear_headers["Location"], LINEAR_DEMO_URLS[0])
+        chain_status, chain_headers, _ = self._request("GET", "/0")
+        self.assertEqual(chain_status, 302)
+        self.assertEqual(chain_headers["Location"], chain_url)
+
+    def test_linear_form_shortens_and_redirects_without_touching_primary_table(self):
+        linear_url = "https://linear-added.example/path"
+        status, _, response_body = self._request(
+            "POST",
+            "/linear/shorten",
+            urlencode({"url": linear_url}),
+        )
+        self.assertEqual(status, 200)
+        self.assertIn('<a href="/linear/4">/linear/4</a>', response_body)
+
+        status, headers, _ = self._request("GET", "/linear/4")
+        self.assertEqual(status, 302)
+        self.assertEqual(headers["Location"], linear_url)
+        status, _, chaining_page = self._request("GET", "/table")
+        self.assertEqual(status, 200)
+        self.assertNotIn(linear_url, chaining_page)
+        status, _, linear_page = self._request("GET", "/table/linear")
+        self.assertEqual(status, 200)
+        self.assertIn(linear_url, linear_page)
 
 
 if __name__ == "__main__":
