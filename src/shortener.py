@@ -19,6 +19,10 @@ class URLShortener:
     def code_table(self) -> HashTable | LinearProbingHashTable:
         return self._codes_to_urls
 
+    @property
+    def url_table(self) -> HashTable | LinearProbingHashTable:
+        return self._urls_to_codes
+
     @staticmethod
     def _validate_url(url: str) -> None:
         if not isinstance(url, str) or not url or any(

@@ -1,0 +1,239 @@
+"""HTTP service for the in-memory URL shortener."""
+
+from __future__ import annotations
+
+import argparse
+import html
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qsl, quote, urlsplit
+
+from src.hash_table import HashTable, LinearProbingHashTable
+from src.shortener import URLShortener
+
+MAX_REQUEST_BODY = 8192
+HOST = "0.0.0.0"
+
+
+def _render_page(title: str, content: str) -> str:
+    escaped_title = html.escape(title)
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escaped_title}</title>
+  <style>
+    body {{ font: 16px/1.5 sans-serif; margin: 2rem auto; max-width: 1000px; padding: 0 1rem; }}
+    nav {{ display: flex; gap: 1rem; margin-bottom: 1.5rem; }}
+    input[type=url] {{ box-sizing: border-box; max-width: 42rem; padding: .6rem; width: 100%; }}
+    button {{ cursor: pointer; margin-top: .75rem; padding: .6rem 1rem; }}
+    code {{ overflow-wrap: anywhere; }}
+    .bucket {{ border: 1px solid #bbb; margin: .75rem 0; padding: .75rem; }}
+    .bucket h2 {{ font-size: 1rem; margin: 0 0 .75rem; }}
+    .chain {{ align-items: stretch; display: flex; flex-wrap: wrap; gap: .5rem; }}
+    .node {{ border: 1px solid #667; border-radius: .4rem; max-width: 28rem; padding: .75rem; }}
+    .node p {{ margin: .35rem 0; }}
+    .arrow {{ align-self: center; font-size: 1.4rem; }}
+    .empty {{ color: #666; }}
+    ol {{ overflow-wrap: anywhere; }}
+  </style>
+</head>
+<body>
+  <nav><a href="/">URL 줄이기</a><a href="/table">해시 테이블</a></nav>
+  <main>
+    <h1>{escaped_title}</h1>
+    {content}
+  </main>
+</body>
+</html>
+"""
+
+
+def _send_html(
+    handler: BaseHTTPRequestHandler,
+    status: int,
+    title: str,
+    content: str,
+) -> None:
+    body = _render_page(title, content).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _table_page(table: HashTable | LinearProbingHashTable) -> str:
+    output = [
+        "<p>버킷의 노드는 연결 리스트 순서이며, 화살표는 다음 노드를 가리킵니다.</p>"
+    ]
+    for bucket_index in range(table.capacity):
+        nodes = table.bucket_items(bucket_index)
+        output.append(
+            f'<section class="bucket"><h2>칸 {bucket_index}</h2>'
+        )
+        if not nodes:
+            output.append('<span class="empty">비어 있음</span></section>')
+            continue
+
+        output.append('<div class="chain">')
+        for node_index, (url, stored_code) in enumerate(nodes):
+            if not isinstance(stored_code, str):
+                raise RuntimeError("URL index contains a non-string short code")
+            code = html.escape(stored_code, quote=True)
+            safe_url = html.escape(url)
+            output.extend(
+                (
+                    '<article class="node">',
+                    f"<h3>노드 {node_index + 1}</h3>",
+                    f"<p><strong>URL 키:</strong> <code>{safe_url}</code></p>",
+                    f"<p><strong>짧은 코드:</strong> <code>{code}</code></p>",
+                    f'<p><strong>짧은 링크:</strong> <a href="/{code}">/{code}</a></p>',
+                    "<details>",
+                    "<summary>Horner 해시 계산 과정</summary>",
+                    f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>",
+                    "<ol>",
+                )
+            )
+            previous_hash = 0
+            for character, code_point, accumulated in table.hash_trace(url):
+                safe_character = html.escape(character)
+                output.append(
+                    "<li>"
+                    f"h = ({previous_hash} * 31 + ord('{safe_character}') "
+                    f"[{code_point}]) % {table.capacity} = {accumulated}"
+                    "</li>"
+                )
+                previous_hash = accumulated
+            output.extend(("</ol>", "</details>", "</article>"))
+            if node_index + 1 < len(nodes):
+                output.append('<span class="arrow" aria-label="다음 노드">→</span>')
+            else:
+                output.append('<span class="arrow">→ ∅</span>')
+        output.append("</div></section>")
+    return "\n".join(output)
+
+
+def make_handler(shortener: URLShortener) -> type[BaseHTTPRequestHandler]:
+    """Create an HTTP handler backed by one shortener instance."""
+
+    class ShortenerRequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            path = urlsplit(self.path).path
+            if path == "/":
+                content = """
+<form method="post" action="/shorten">
+  <label for="url">줄일 URL</label><br>
+  <input id="url" name="url" type="url" required>
+  <br><button type="submit">줄이기</button>
+</form>
+"""
+                _send_html(self, 200, "URL 단축기", content)
+                return
+
+            if path == "/table":
+                content = _table_page(shortener.url_table)
+                _send_html(self, 200, "해시 테이블", content)
+                return
+
+            if not path.startswith("/") or path.count("/") != 1 or len(path) == 1:
+                _send_html(self, 404, "찾을 수 없음", "<p>짧은 링크가 없습니다.</p>")
+                return
+
+            code = path[1:]
+            try:
+                original_url = shortener.expand(code)
+            except KeyError:
+                _send_html(self, 404, "찾을 수 없음", "<p>짧은 링크가 없습니다.</p>")
+                return
+            if not isinstance(original_url, str):
+                raise RuntimeError("code index contains a non-string URL")
+
+            location = quote(original_url, safe=":/?#[]@!$&'()*+,;=%")
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_POST(self) -> None:
+            if urlsplit(self.path).path != "/shorten":
+                _send_html(self, 404, "찾을 수 없음", "<p>요청한 경로가 없습니다.</p>")
+                return
+
+            content_length = self.headers.get("Content-Length")
+            try:
+                body_length = int(content_length) if content_length is not None else -1
+            except ValueError:
+                body_length = -1
+            if body_length < 0:
+                _send_html(self, 400, "잘못된 요청", "<p>요청 본문 길이가 올바르지 않습니다.</p>")
+                return
+            if body_length > MAX_REQUEST_BODY:
+                _send_html(self, 413, "요청이 너무 큼", "<p>URL 입력이 너무 깁니다.</p>")
+                return
+
+            try:
+                raw_body = self.rfile.read(body_length)
+                if len(raw_body) != body_length:
+                    _send_html(
+                        self,
+                        400,
+                        "잘못된 요청",
+                        "<p>요청 본문이 끝까지 전달되지 않았습니다.</p>",
+                    )
+                    return
+                body = raw_body.decode("utf-8")
+                fields = parse_qsl(body, keep_blank_values=True, max_num_fields=32)
+            except (UnicodeDecodeError, ValueError):
+                _send_html(self, 400, "잘못된 요청", "<p>폼 입력을 읽을 수 없습니다.</p>")
+                return
+
+            url = next((value for name, value in fields if name == "url"), None)
+            if url is None:
+                _send_html(self, 400, "잘못된 요청", "<p>URL을 입력해 주세요.</p>")
+                return
+            try:
+                code = shortener.shorten(url)
+            except ValueError:
+                _send_html(
+                    self,
+                    400,
+                    "잘못된 URL",
+                    "<p>http 또는 https URL과 호스트 이름을 입력해 주세요.</p>",
+                )
+                return
+
+            escaped_url = html.escape(url)
+            escaped_code = html.escape(code, quote=True)
+            content = (
+                f"<p>원래 URL: <code>{escaped_url}</code></p>"
+                f'<p>짧은 링크: <a href="/{escaped_code}">/{escaped_code}</a></p>'
+                '<p><a href="/">다른 URL 줄이기</a></p>'
+            )
+            _send_html(self, 200, "단축 결과", content)
+
+    return ShortenerRequestHandler
+
+
+def serve(port: int = 8000) -> None:
+    server = HTTPServer((HOST, port), make_handler(URLShortener()))
+    print(f"URL shortener listening on http://{HOST}:{server.server_port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+    finally:
+        server.server_close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the URL shortener HTTP service.")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
+    serve(args.port)
+
+
+if __name__ == "__main__":
+    main()
