@@ -3,17 +3,20 @@
 from urllib.parse import urlsplit
 
 from src.base62 import encode
-from src.hash_table import HashTable
+from src.hash_table import HashTable, LinearProbingHashTable
 
 
 class URLShortener:
-    def __init__(self, table_type: type[HashTable] = HashTable):
+    def __init__(
+        self,
+        table_type: type[HashTable] | type[LinearProbingHashTable] = HashTable,
+    ):
         self._urls_to_codes = table_type()
         self._codes_to_urls = table_type()
         self._next_id = 0
 
     @property
-    def code_table(self) -> HashTable:
+    def code_table(self) -> HashTable | LinearProbingHashTable:
         return self._codes_to_urls
 
     @staticmethod
