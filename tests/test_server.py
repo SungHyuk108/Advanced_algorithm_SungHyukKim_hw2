@@ -177,7 +177,24 @@ class ShortenerServerTests(unittest.TestCase):
             "<summary>Horner 해시 계산 과정</summary>",
             linear_page,
         )
-        self.assertIn("(0 * 31 + ord('h') [104]) % 64 =", linear_page)
+        first_horner = linear_page.split(
+            f"<td><code>{LINEAR_DEMO_URLS[0]}</code>"
+            '<details class="horner-calculation">',
+            1,
+        )[1].split("</details>", 1)[0]
+        self.assertIn(
+            "<code>1. h1=(0*31+ord('h')[104])%64=40<br>2. h2=",
+            first_horner,
+        )
+        self.assertEqual(first_horner.count("<br>"), len(LINEAR_DEMO_URLS[0]) - 1)
+        for demo_url in LINEAR_DEMO_URLS:
+            calculation = linear_page.split(
+                f"<td><code>{demo_url}</code>"
+                '<details class="horner-calculation">',
+                1,
+            )[1].split("</details>", 1)[0]
+            self.assertIn("<code>1. h1=", calculation)
+            self.assertEqual(calculation.count("<br>"), len(demo_url) - 1)
         self.assertIn("(시작 칸 h(key) = 48)", linear_page)
         self.assertIn('href="/linear/0"', linear_page)
         self.assertIn('action="/linear/shorten"', linear_page)

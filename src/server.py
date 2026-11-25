@@ -179,11 +179,11 @@ def _append_compact_horner_steps(
     ):
         safe_character = html.escape(character)
         equations.append(
-            f"h{step} = ({previous_hash} * 31 + ord('{safe_character}') "
-            f"[{code_point}]) % {table.capacity} = {accumulated}"
+            f"{step}. h{step}=({previous_hash}*31+ord('{safe_character}')"
+            f"[{code_point}])%{table.capacity}={accumulated}"
         )
         previous_hash = accumulated
-    output.append(f"<p><code>{'; '.join(equations)}</code></p>")
+    output.append(f"<p><code>{'<br>'.join(equations)}</code></p>")
 
 
 def _table_page(
