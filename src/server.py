@@ -164,6 +164,26 @@ def _append_horner_steps(
         previous_hash = accumulated
 
 
+def _append_compact_horner_steps(
+    output: list[str],
+    table: LinearProbingHashTable,
+    key: str,
+) -> None:
+    previous_hash = 0
+    equations = []
+    for step, (character, code_point, accumulated) in enumerate(
+        table.hash_trace(key),
+        start=1,
+    ):
+        safe_character = html.escape(character)
+        equations.append(
+            f"h{step} = ({previous_hash} * 31 + ord('{safe_character}') "
+            f"[{code_point}]) % {table.capacity} = {accumulated}"
+        )
+        previous_hash = accumulated
+    output.append(f"<p><code>{'; '.join(equations)}</code></p>")
+
+
 def _table_page(
     table: HashTable | LinearProbingHashTable,
     short_link_prefix: str = "/",
@@ -337,6 +357,7 @@ def _linear_table_page(shortener: URLShortener) -> str:
                 "h = (이전 h * 31 + 문자 코드) % 용량으로 계산하며, "
                 "마지막 값이 위 표의 시작 칸입니다.</p>"
             ),
+            "<p>각 URL의 모든 문자 단계 계산식:</p>",
             '<ol class="hash-calculation-list">',
         )
     )
@@ -347,13 +368,11 @@ def _linear_table_page(shortener: URLShortener) -> str:
                 '<li class="hash-calculation">',
                 f"<h3><code>{html.escape(url)}</code></h3>",
                 f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>",
-                "<ol>",
             )
         )
-        _append_horner_steps(output, table, url)
+        _append_compact_horner_steps(output, table, url)
         output.extend(
             (
-                "</ol>",
                 f"<p><strong>최종값:</strong> {start} "
                 f"(시작 칸 h(key) = {start})</p>",
                 "</li>",
