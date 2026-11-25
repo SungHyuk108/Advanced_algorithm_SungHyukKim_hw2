@@ -147,6 +147,23 @@ def _append_probe_trace(
     output.extend(("</ol>", "</details>"))
 
 
+def _append_horner_steps(
+    output: list[str],
+    table: HashTable | LinearProbingHashTable,
+    key: str,
+) -> None:
+    previous_hash = 0
+    for character, code_point, accumulated in table.hash_trace(key):
+        safe_character = html.escape(character)
+        output.append(
+            "<li>"
+            f"h = ({previous_hash} * 31 + ord('{safe_character}') "
+            f"[{code_point}]) % {table.capacity} = {accumulated}"
+            "</li>"
+        )
+        previous_hash = accumulated
+
+
 def _table_page(
     table: HashTable | LinearProbingHashTable,
     short_link_prefix: str = "/",
@@ -207,16 +224,7 @@ def _table_page(
                     "<ol>",
                 )
             )
-            previous_hash = 0
-            for character, code_point, accumulated in table.hash_trace(url):
-                safe_character = html.escape(character)
-                output.append(
-                    "<li>"
-                    f"h = ({previous_hash} * 31 + ord('{safe_character}') "
-                    f"[{code_point}]) % {table.capacity} = {accumulated}"
-                    "</li>"
-                )
-                previous_hash = accumulated
+            _append_horner_steps(output, table, url)
             output.extend(("</ol>", "</details>"))
             if linear_table is None:
                 output.append("</article>")
@@ -319,7 +327,39 @@ def _linear_table_page(shortener: URLShortener) -> str:
             f"<td><code>{probe_path}</code></td></tr>"
         )
 
-    output.append("</tbody></table></div>")
+    output.extend(
+        (
+            "</tbody></table></div>",
+            '<section class="hash-calculations">',
+            "<h2>Horner 해시 계산 과정</h2>",
+            (
+                "<p>각 URL 문자를 왼쪽부터 처리합니다. 매 문자마다 "
+                "h = (이전 h * 31 + 문자 코드) % 용량으로 계산하며, "
+                "마지막 값이 위 표의 시작 칸입니다.</p>"
+            ),
+            '<ol class="hash-calculation-list">',
+        )
+    )
+    for url, _ in table.items():
+        start = table.bucket_index(url)
+        output.extend(
+            (
+                '<li class="hash-calculation">',
+                f"<h3><code>{html.escape(url)}</code></h3>",
+                f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>",
+                "<ol>",
+            )
+        )
+        _append_horner_steps(output, table, url)
+        output.extend(
+            (
+                "</ol>",
+                f"<p><strong>최종값:</strong> {start} "
+                f"(시작 칸 h(key) = {start})</p>",
+                "</li>",
+            )
+        )
+    output.extend(("</ol>", "</section>"))
     return "\n".join(output)
 
 
