@@ -169,10 +169,14 @@ class ShortenerServerTests(unittest.TestCase):
         self.assertIn("최대 검사 횟수는 4회", linear_page)
         self.assertIn("50 → 51 → 52", linear_page)
         self.assertIn("실제 조사 순서", linear_page)
-        self.assertNotIn("<details>", linear_page)
-        self.assertIn('<section class="hash-calculations">', linear_page)
-        self.assertIn("<h2>Horner 해시 계산 과정</h2>", linear_page)
-        self.assertEqual(linear_page.count('class="hash-calculation"'), 30)
+        self.assertNotIn('<section class="hash-calculations">', linear_page)
+        self.assertEqual(linear_page.count('<details class="horner-calculation">'), 30)
+        self.assertIn(
+            f"<td><code>{LINEAR_DEMO_URLS[0]}</code>"
+            '<details class="horner-calculation">'
+            "<summary>Horner 해시 계산 과정</summary>",
+            linear_page,
+        )
         self.assertIn("(0 * 31 + ord('h') [104]) % 64 =", linear_page)
         self.assertIn("(시작 칸 h(key) = 48)", linear_page)
         self.assertIn('href="/linear/0"', linear_page)
@@ -205,8 +209,13 @@ class ShortenerServerTests(unittest.TestCase):
         status, _, linear_page = self._request("GET", "/table/linear")
         self.assertEqual(status, 200)
         self.assertIn(linear_url, linear_page)
-        self.assertIn('<section class="hash-calculations">', linear_page)
-        self.assertEqual(linear_page.count('class="hash-calculation"'), 31)
+        self.assertEqual(linear_page.count('<details class="horner-calculation">'), 31)
+        self.assertIn(
+            f"<td><code>{linear_url}</code>"
+            '<details class="horner-calculation">'
+            "<summary>Horner 해시 계산 과정</summary>",
+            linear_page,
+        )
 
 
 if __name__ == "__main__":

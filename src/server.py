@@ -78,6 +78,8 @@ def _render_page(title: str, content: str) -> str:
     .slot-table th, .slot-table td {{ border: 1px solid #bbb; padding: .5rem; text-align: left; vertical-align: top; }}
     .slot-table th {{ background: #eee; }}
     .slot-table .empty-slot {{ color: #666; }}
+    .horner-calculation {{ margin-top: .5rem; }}
+    .horner-calculation summary {{ cursor: pointer; }}
     ol {{ overflow-wrap: anywhere; }}
   </style>
 </head>
@@ -339,46 +341,25 @@ def _linear_table_page(shortener: URLShortener) -> str:
         output.append(
             f'<tr class="occupied-slot"><th scope="row">{slot}</th>'
             "<td>저장됨</td>"
-            f"<td><code>{html.escape(url)}</code></td>"
-            f"<td><code>{html.escape(stored_code)}</code></td>"
-            f'<td><a href="{link_path}">{link_path}</a></td>'
-            f"<td>{start}</td>"
-            f"<td>{len(trace) - 1}칸 / {len(trace)}회</td>"
-            f"<td><code>{probe_path}</code></td></tr>"
-        )
-
-    output.extend(
-        (
-            "</tbody></table></div>",
-            '<section class="hash-calculations">',
-            "<h2>Horner 해시 계산 과정</h2>",
-            (
-                "<p>각 URL 문자를 왼쪽부터 처리합니다. 매 문자마다 "
-                "h = (이전 h * 31 + 문자 코드) % 용량으로 계산하며, "
-                "마지막 값이 위 표의 시작 칸입니다.</p>"
-            ),
-            "<p>각 URL의 모든 문자 단계 계산식:</p>",
-            '<ol class="hash-calculation-list">',
-        )
-    )
-    for url, _ in table.items():
-        start = table.bucket_index(url)
-        output.extend(
-            (
-                '<li class="hash-calculation">',
-                f"<h3><code>{html.escape(url)}</code></h3>",
-                f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>",
-            )
+            f"<td><code>{html.escape(url)}</code>"
+            '<details class="horner-calculation">'
+            "<summary>Horner 해시 계산 과정</summary>"
+            f"<p>초깃값 h = 0, 용량 = {table.capacity}</p>"
         )
         _append_compact_horner_steps(output, table, url)
         output.extend(
             (
                 f"<p><strong>최종값:</strong> {start} "
                 f"(시작 칸 h(key) = {start})</p>",
-                "</li>",
+                "</details></td>",
+                f"<td><code>{html.escape(stored_code)}</code></td>",
+                f'<td><a href="{link_path}">{link_path}</a></td>',
+                f"<td>{start}</td>",
+                f"<td>{len(trace) - 1}칸 / {len(trace)}회</td>",
+                f"<td><code>{probe_path}</code></td></tr>",
             )
         )
-    output.extend(("</ol>", "</section>"))
+    output.append("</tbody></table></div>")
     return "\n".join(output)
 
 
